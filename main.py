@@ -27,6 +27,11 @@ class Board():
         self.win = False
         self.turn = 1
         self.players = {1:player1,2:player2}
+        self.index13 = [0]*9 # index of small boards base 3
+        self.index23 = 0 # index of large board base 3
+        self.index24 = 0 # index of large board base 4
+        self.pow3 = [3**n for n in range(9)]
+        self.pow4 = [4**n for n in range(9)]
         if player1 is not None:
             player1.turn = 1
             player1.board = self
@@ -46,32 +51,33 @@ class Board():
 
     # logica del juego  
     def move(self,cell):
-        if self.canMove(cell):            
-            self.__setCell(cell,self.turn)
-            self.possibleMoves[cell[0]].remove(cell[1])
-            render.after(0, render.drawMove,cell,self.turn)
+        if not self.canMove(cell):
+            return False
+        self.__setCell(cell,self.turn)
+        self.index13[cell[0]] += self.pow3[cell[1]]*self.turn # actualizar indices
+        self.possibleMoves[cell[0]].remove(cell[1])
+        render.after(0, render.drawMove,cell,self.turn)
 
-            if self.getWinBoard(cell[0]) != 3: # si el tablero no está empatado se comprueba si se ha ganado
-                self.__setWinBoard(cell[0], self.checkWin(self.board[cell[0]]))
-                if self.getWinBoard(cell[0]) != 0:
-                    if self.getWinBoard(cell[0]) != 3:
-                        render.after(0,render.winBoard,cell[0],self.turn)
-                    self.win = self.checkWin(self.wBoard)
-            
-            self.nextMove.append(-1 if (self.wBoard[cell[1]] in [1,2] or len(self.possibleMoves[cell[1]]) == 0) else cell[1])
-            self.__switchTurn()
-            render.after(0,render.updateNextMove,cell)
-            self.lastMove.append(cell)
-            return True
-        return False
+        if self.wBoard[cell[0]] != 3: # si el tablero no está empatado se comprueba si se ha ganado
+            self.wBoard[cell[0]] = winLUT[self.index13[cell[0]]]
+            if self.wBoard[cell[0]] != 0:
+                if self.wBoard[cell[0]] != 3:
+                    render.after(0,render.winBoard,cell[0],self.turn)
+                self.win = self.checkWin(self.wBoard)
+        
+        self.nextMove.append(-1 if (self.wBoard[cell[1]] in [1,2] or len(self.possibleMoves[cell[1]]) == 0) else cell[1])
+        self.__switchTurn()
+        render.after(0,render.updateNextMove,cell)
+        self.lastMove.append(cell)
+        return True
 
     def move2(self,cell): # mover ia sin render
         self.__setCell(cell,self.turn)
+        self.index13[cell[0]] += self.pow3[cell[1]]*self.turn # actualizar indices
         self.possibleMoves[cell[0]].remove(cell[1])
-        if self.getWinBoard(cell[0]) != 3:
-            self.__setWinBoard(cell[0], self.checkWin(self.board[cell[0]]))
-            if self.getWinBoard(cell[0]) != 0:
-                self.win = self.checkWin(self.wBoard)
+        self.wBoard[cell[0]] = winLUT[self.index13[cell[0]]]
+        if self.wBoard[cell[0]] != 0:
+            self.win = self.checkWin(self.wBoard)
             
         self.nextMove.append(-1 if (self.wBoard[cell[1]] in [1,2] or len(self.possibleMoves[cell[1]]) == 0) else cell[1])
         self.__switchTurn()
@@ -79,14 +85,13 @@ class Board():
 
     def undomove2(self):
         move = self.lastMove.pop()
+        self.__switchTurn()
         self.nextMove.pop()
         self.__setCell(move,0)
-        self.__switchTurn()
+        self.index13[move[0]] -= self.pow3[move[1]]*self.turn # actualizar indices
         self.possibleMoves[move[0]].add(move[1])
-        if self.getWinBoard(move[0]) != 0:
-            self.__setWinBoard(move[0], self.checkWin(self.board[move[0]]))
-        if self.win != 0:
-            self.win = self.checkWin(self.wBoard)     
+        self.wBoard[move[0]] = winLUT[self.index13[move[0]]]
+        self.win = 0 
 
     def checkWin(self,board):
         if any(all(i == self.turn for i in itemgetter(*line)(board)) for line in lines):
@@ -95,12 +100,6 @@ class Board():
         if all(bitor(itemgetter(*line)(board))==3 for line in lines): # comprobar si todas las lineas estan empatadas y declarar empate
             return 3
         return 0
-        
-    def getWinBoard(self,cell): # obtener ganador de tres en raya pequeño
-        return self.wBoard[cell]
-
-    def __setWinBoard(self,cell,value): # establecer ganador de tres en raya pequeño
-        self.wBoard[cell] = value
 
     def getCell(self,cell):
         return self.board[cell[0]][cell[1]]
@@ -207,9 +206,9 @@ class Render(tk.Canvas):
         animatecells = []
         self.tag_raise("forbidden_move")
         for k in range(9):
-            canmove = newboard.getWinBoard(cell[1]) in [0,3] and k==cell[1] or (newboard.getWinBoard(k) in [0,3] and newboard.getWinBoard(cell[1]) not in [0,3])
+            canmove = newboard.wBoard[cell[1]] in [0,3] and k==cell[1] or (newboard.wBoard[k] in [0,3] and newboard.wBoard[cell[1]] not in [0,3])
             self.itemconfig(self.__nextMove[k],outline=self.colors[newboard.getTurn(1)],width=5*int(canmove))
-            self.itemconfig(self.__forbiddenMove[k],fill='' if (newboard.nextMove[-1]==k or newboard.nextMove[-1]==-1) or newboard.getWinBoard(k) != 0 else '#404040')
+            self.itemconfig(self.__forbiddenMove[k],fill='' if (newboard.nextMove[-1]==k or newboard.nextMove[-1]==-1) or newboard.wBoard[k] != 0 else '#404040')
             animatecells += [k]
         self.__animateNextMove(animatecells)
 
@@ -348,17 +347,15 @@ class IA(Player):
     # HEURISTICOS
 
     def __h0(self,board):
-        s = [heuristicsLUT[indexBoard(b)][2] for b in board.board]
+        s = [heuristicsLUT[board.index13[i]][2] for i in range(9)]
         res = heuristicsLUT[indexBoard(s)][2]
         return res
     
     def __h1(self,board):
-        s = [heuristicsLUT[indexBoard(b)][0] for b in board.board]
-        return sum(s[k] for k in range(9) if board.wBoard[k] != 3)
+        return sum(heuristicsLUT[board.index13[i]][0] for i in range(9) if board.wBoard[i] != 3)
     
     def __h2(self,board):
-        s = [heuristicsLUT[indexBoard(b)][1] for b in board.board]
-        return sum(s[k] for k in range(9) if board.wBoard[k] != 3)
+        return sum(heuristicsLUT[board.index13[i]][1] for i in range(9) if board.wBoard[i] != 3)
 
     def __h3(self,board):
         return board.wBoard.count(1)-board.wBoard.count(2)
@@ -395,13 +392,23 @@ def h_countlines(board): # cuenta el numero de lineas que puede hacer cada jugad
 def indexBoard(board,base=3): # indexar tableros entre 0 y base^9-1
     return reduce(lambda a,b: base*a+b,board)
 
+def checkWin(board):
+    if any(all(i == 1 for i in itemgetter(*line)(board)) for line in lines):
+        return 1
+    if any(all(i == 2 for i in itemgetter(*line)(board)) for line in lines):
+        return 2
+    if all(bitor(itemgetter(*line)(board))==3 for line in lines): # comprobar si todas las lineas estan empatadas y declarar empate
+        return 3
+    return 0
+
 # UTILIDADES
 
 def printBoard(board):
     print("\n".join("".join(" ".join("".join(str(board[3*i+j][3*k+l]) for l in range(3)) for j in range(3))+"\n" for k in range(3)) for i in range(3)))
 	
 def bitor(x):
-    return reduce(lambda a,b: a|b,x)
+    return x[0]|x[1]|x[2]
+#    return reduce(lambda a,b: a|b,x)
 
 # COMPARACION DE IAS
 
@@ -452,6 +459,7 @@ def compareNodesByDepth(h1,h2,n=10,output=False): # compara el numero de nodos v
         ia1 = IA("IA%d"%h1,d,h1)
         ia2 = IA("IA%d"%h2,d,h2)
         print("Profundidad", d)
+        t0 = time.time()
         for i in range(n):
             board = Board(ia1,ia2)
             board.start(False,False)
@@ -461,6 +469,8 @@ def compareNodesByDepth(h1,h2,n=10,output=False): # compara el numero de nodos v
                 nodes[d][j] += ia2.nodes_explored[j]
             ia1.nodes_explored = []
             ia2.nodes_explored = []
+        t1 = time.time()
+        print("Time elapsed: ",t1-t0)
     return nodes
 
 def play(difficulty=0):
@@ -484,14 +494,40 @@ def play(difficulty=0):
 
     window.mainloop()
 
+def eloSystem(elo=None,n=1000,K=32):
+    if elo is None:
+        elo = [[1500] for i in range(8)]
+    for i in range(n):
+        order = random.sample(range(8),8)
+        for j in range(4):
+            ia1 = order.pop()
+            ia2 = order.pop()
+            board = Board(IA("IA %d"%ia1,4,ia1),IA("IA %d"%ia2,4,ia2))
+            board.start(False,False)
+            res = {1:1,2:0,3:0.5}[board.win] # puntuacion victoria primer jugador, segundo 1-res
+            Qa = pow(10,elo[ia1][-1]/400)
+            Qb = pow(10,elo[ia2][-1]/400)
+            elo[ia1] += [elo[ia1][-1]+K*(res-Qa/(Qa+Qb))]
+            elo[ia2] += [elo[ia2][-1]+K*(Qa/(Qa+Qb)-res)]
+        
+        print(f"Round %d"%i)
+    for i,x in enumerate(elo):
+        plt.plot(x,label=f"h%d"%i)
+    plt.legend()
+    plt.show()
+
 if __name__ == "__main__":
     print("Precomputando tablas")
     t = time.process_time()
     localHeuristics = [h_weights,h_count,h_countlines,h_weights_weak] # lista de heuristicos para los tres en raya pequeños
     heuristicsLUT = [[f(board) for f in localHeuristics] for board in product(range(3),repeat=9)] # tabla de consulta de heuristicos para agilizar el minimax
     fullheuristicsLUT = [h_weights(board) for board in product(range(4),repeat=9)]
+    winLUT = [checkWin(board) for board in product(range(3),repeat=9)]
+    fullwinLUT = [checkWin(board) for board in product(range(4),repeat=9)]
 
     print("%.3f s"%(time.process_time()-t))
 
     difficulty = int(input("Introduce la dificultad (0:fácil, 1:normal, 2:difícil, 3:imposible): "))
     play(difficulty)
+
+    
